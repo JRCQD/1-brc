@@ -1,25 +1,32 @@
-pub struct Station {
-    pub name: String,
-    pub temp: f32,
-}
-
-impl Station {
-    pub fn new(line: &str) -> Self {
-        let line_atoms: Vec<&str> = line.split(';').collect();
-        let name = line_atoms.first().unwrap().to_string();
-        let temp: f32 = line_atoms.last().unwrap().to_string().parse().unwrap();
-        Station { name, temp }
-    }
-}
-
+#[derive(Clone)]
 pub struct StationAverage {
     pub name: String,
     min: f32,
     max: f32,
     count: u32,
     running_total: f32,
-    pub average: Option<f32>
+    pub average: Option<f32>,
 }
+
+impl PartialEq for StationAverage {
+    fn eq(&self, other: &StationAverage) -> bool {
+        self.name == other.name
+    }
+}
+
+impl PartialOrd for StationAverage {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.name.cmp(&other.name))
+    }
+}
+
+impl Ord for StationAverage {
+    fn cmp(&self, other: &StationAverage) -> std::cmp::Ordering {
+        self.name.cmp(&other.name)
+    }
+}
+
+impl Eq for StationAverage {}
 
 impl StationAverage {
     pub fn new(name: String, temp: f32) -> Self {
@@ -29,7 +36,7 @@ impl StationAverage {
             max: temp,
             count: 1,
             running_total: temp,
-            average: None
+            average: None,
         }
     }
 
@@ -52,7 +59,17 @@ impl StationAverage {
     pub fn average(&mut self) -> f32 {
         let ave = self.running_total / self.count as f32;
         self.average = Some(ave);
-        return ave
+        return ave;
+    }
+
+    pub fn to_string(&self) -> String {
+        format!(
+            "{}={}/{}/{}\n",
+            self.name,
+            self.min,
+            self.running_total / self.count as f32,
+            self.max
+        )
     }
 }
 
