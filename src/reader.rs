@@ -18,3 +18,17 @@ pub fn parse_file(file: String, queue: Sender<String>) {
         }
     }
 }
+
+pub fn parse_file_with_buf(file: String, queue: Sender<Vec<u8>>) {
+    println!("{}", file);
+    let file = File::open(file).unwrap();
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::with_capacity(1024);
+    while reader.read_until(b'\n', &mut buffer).unwrap() > 0 {
+        if let Some(&b'\n') = buffer.last() {
+            buffer.pop();
+        }
+        queue.send(buffer.clone()).unwrap();
+        buffer.clear();
+    }
+}
