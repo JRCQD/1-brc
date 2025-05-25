@@ -1,6 +1,6 @@
 use std::{
     fs::OpenOptions,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write}, time::Instant,
 };
 
 use crate::{container::Container, station::StationAverage};
@@ -10,6 +10,7 @@ pub struct Worker {
     rec_chan: Receiver<String>,
     container: Container,
     output: String,
+    timeings: Vec<u128>
 }
 
 impl Worker {
@@ -18,22 +19,30 @@ impl Worker {
             rec_chan: chan,
             container: Container::new(),
             output: out,
+            timeings: Vec::new()
         }
     }
 
     pub fn listen(&mut self) {
+        let mut counter = 0;
         while let Ok(line) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
+            // let start = Instant::now();
             let bytes = line.as_bytes();
             let sep = self.get_sep(bytes);
-            let name = line[..sep].to_string();
+            let name = &line[..sep];
             let value = &line[sep + 1..];
             let value = self.parse_string_to_int(value);
             if let Some(existing) = self.container.get_mut(&name) {
                 existing.update_values(value);
             } else {
-                let station_ave = StationAverage::new(name.clone(), value);
+                let station_ave = StationAverage::new(name.to_string(), value);
                 self.container.insert(station_ave, &name);
             }
+            // counter += 1;
+            // if counter % 100 == 0 {
+            //     let end = start.elapsed();
+            //     self.timeings.push(end.as_nanos());
+            // }
         }
         self.write();
     }
@@ -87,5 +96,14 @@ impl Worker {
                 None => {}
             }
         }
+        // let file = OpenOptions::new()
+        // .create(true)
+        // .append(true)
+        // .open("jemalloc_loop_time.txt")
+        // .unwrap();
+        // let mut writer = BufWriter::new(file);
+        // for data in &self.timeings {
+        //     writeln!(writer, "{},", data).unwrap();
+        // }
     }
 }
