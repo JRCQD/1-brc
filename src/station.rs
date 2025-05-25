@@ -1,12 +1,13 @@
-#[derive(Clone, Debug)]
+const MAX_ARRAY_SIZE: usize = 100;
+
+#[derive(Clone, Debug, Copy)]
 pub struct StationAverage {
-    pub name: String,
+    pub name: [u8; MAX_ARRAY_SIZE],
     min: i16,
     max: i16,
     count: u32,
     running_total: u32,
     mutliplier: f32,
-    // pub average: Option<f32>,
 }
 
 impl PartialEq for StationAverage {
@@ -31,24 +32,23 @@ impl Eq for StationAverage {}
 
 impl StationAverage {
     pub fn new(name: String, temp: i16) -> Self {
+        let mut arr = [0u8; MAX_ARRAY_SIZE];
+        let s = name.as_bytes();
+        arr[..s.len()].copy_from_slice(&s[..s.len()]);
         StationAverage {
-            name,
+            name: arr,
             min: temp,
             max: temp,
             count: 1,
             running_total: temp as u32,
-            // average: None,
             mutliplier: 10.0,
         }
     }
 
     #[inline(always)]
     pub fn update_values(&mut self, temp: i16) {
-        if temp < self.min {
-            self.min = temp
-        } else if temp > self.max {
-            self.max = temp
-        }
+        self.min = std::cmp::min(self.min, temp);
+        self.max = std::cmp::max(self.max, temp);
 
         // we're going to do a lot of calls to update_values(), so instead of computing the average
         // each time. We'll just keep a running total and a count of all the temps we've seen. Then
@@ -65,14 +65,18 @@ impl StationAverage {
     }
 
     pub fn to_string(&self) -> String {
-        format!("{}={}/{}/{}", self.name, self.min, self.average(), self.max)
+        format!("{}={}/{}/{}", self.from_bytes(), self.min, self.average(), self.max)
+    }
+
+    fn from_bytes(&self) -> &str {
+        std::str::from_utf8(&self.name[..MAX_ARRAY_SIZE]).unwrap()
     }
 }
 
 impl Default for StationAverage {
     fn default() -> Self {
         StationAverage {
-            name: String::from(""),
+            name: [0; MAX_ARRAY_SIZE],
             min: 0,
             max: 0,
             count: 0,

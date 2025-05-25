@@ -12,7 +12,7 @@ fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
     let data = format!("{}/{}", base, "measurements.txt");
     let output = format!("{}/{}", base, "output_sixth_pass.txt");
-    let (send, rec) = bounded(100_000_000);
+    let (send, rec) = bounded(200_000_000);
     let mut worker = Worker::new(rec, output);
     let handle = std::thread::spawn(move || {
         worker.listen();
