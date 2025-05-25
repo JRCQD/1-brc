@@ -11,4 +11,5 @@ opt-level=3
 
 [dependencies]
 crossbeam = "0.8.4"
+fxhash = "0.2.1"
 memmap2 = "0.9.5"
