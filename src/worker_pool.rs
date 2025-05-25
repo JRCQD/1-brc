@@ -24,7 +24,7 @@ impl Worker {
     pub fn listen(&mut self) {
         while let Ok(line) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
             let bytes = line.as_bytes();
-            let sep = bytes.iter().position(|&b| b == b';').unwrap();
+            let sep = self.get_sep(bytes);
             let name = line[..sep].to_string();
             let value = &line[sep + 1..];
             let value = self.parse_string_to_int(value);
