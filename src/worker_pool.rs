@@ -1,15 +1,14 @@
 use std::{
-    collections::HashMap,
     fs::OpenOptions,
     io::{BufWriter, Write},
 };
 
+use crate::{container::Container, station::StationAverage};
 use crossbeam::channel::Receiver;
-use crate::station::StationAverage;
 
 pub struct Worker {
     rec_chan: Receiver<String>,
-    container: HashMap<String, StationAverage>,
+    container: Container,
     output: String,
 }
 
@@ -17,7 +16,7 @@ impl Worker {
     pub fn new(chan: Receiver<String>, out: String) -> Self {
         Worker {
             rec_chan: chan,
-            container: HashMap::new(),
+            container: Container::new(),
             output: out,
         }
     }
@@ -33,7 +32,7 @@ impl Worker {
                 existing.update_values(value);
             } else {
                 let station_ave = StationAverage::new(name.clone(), value);
-                self.container.insert(name, station_ave);
+                self.container.insert(station_ave, &name);
             }
         }
         self.write();
@@ -56,31 +55,30 @@ impl Worker {
                 '.' => {
                     continue;
                 }
-                _ => {
-                }
+                _ => {}
             }
         }
         if is_negative {
-            return -integer_part
+            return -integer_part;
         }
-        return integer_part
+        return integer_part;
     }
 
-    fn write(&self) {
-        let mut vec = Vec::with_capacity(self.container.len());
-        for (_, data) in self.container.iter() {
-            vec.push(data);
-        }
-        vec.sort();
+    fn write(&mut self) {
+        self.container.sort();
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(self.output.clone())
             .unwrap();
         let mut writer = BufWriter::new(file);
-
-        for data in vec {
-            writeln!(writer, "{}", data.to_string()).unwrap();
+        for data in &self.container.backing {
+            match data.as_ref() {
+                Some(d) => {
+                    writeln!(writer, "{}", d.to_string()).unwrap();
+                }
+                None => {}
+            }
         }
     }
 }

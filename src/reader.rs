@@ -1,8 +1,8 @@
+use crossbeam::channel::Sender;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
 };
-use crossbeam::channel::Sender;
 
 pub fn parse_file(file: String, queue: Sender<String>) {
     println!("{}", file);
@@ -11,8 +11,7 @@ pub fn parse_file(file: String, queue: Sender<String>) {
     for line in reader.lines() {
         let line = line.unwrap();
         match queue.send(line) {
-            Ok(_) => {
-            }
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("{:?}", e)
             }

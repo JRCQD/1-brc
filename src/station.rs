@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StationAverage {
     pub name: String,
     min: i16,
@@ -6,7 +6,7 @@ pub struct StationAverage {
     count: u32,
     running_total: u32,
     mutliplier: f32,
-    pub average: Option<f32>,
+    // pub average: Option<f32>,
 }
 
 impl PartialEq for StationAverage {
@@ -37,8 +37,8 @@ impl StationAverage {
             max: temp,
             count: 1,
             running_total: temp as u32,
-            average: None,
-            mutliplier: 10.0
+            // average: None,
+            mutliplier: 10.0,
         }
     }
 
@@ -65,13 +65,20 @@ impl StationAverage {
     }
 
     pub fn to_string(&self) -> String {
-        format!(
-            "{}={}/{}/{}",
-            self.name,
-            self.min,
-            self.average(), 
-            self.max
-        )
+        format!("{}={}/{}/{}", self.name, self.min, self.average(), self.max)
+    }
+}
+
+impl Default for StationAverage {
+    fn default() -> Self {
+        StationAverage {
+            name: String::from(""),
+            min: 0,
+            max: 0,
+            count: 0,
+            running_total: 0,
+            mutliplier: 100.0,
+        }
     }
 }
 
