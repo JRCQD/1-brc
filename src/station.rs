@@ -1,12 +1,11 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct StationAverage {
-    pub name: String,
+    pub name: [u8; 100],
+    count: u32,
+    running_total: i32,
     min: i16,
     max: i16,
-    count: u32,
-    running_total: u32,
-    mutliplier: f32,
-    // pub average: Option<f32>,
+    mutliplier: u8,
 }
 
 impl PartialEq for StationAverage {
@@ -31,53 +30,62 @@ impl Eq for StationAverage {}
 
 impl StationAverage {
     pub fn new(name: String, temp: i16) -> Self {
+        let mut arr = [0u8; 100];
+        let s = name.as_bytes();
+        arr[..s.len()].copy_from_slice(&s[..s.len()]);
         StationAverage {
-            name,
+            name: arr,
             min: temp,
             max: temp,
             count: 1,
-            running_total: temp as u32,
-            // average: None,
-            mutliplier: 10.0,
+            running_total: temp as i32,
+            mutliplier: 10,
         }
     }
 
     #[inline]
     pub fn update_values(&mut self, temp: i16) {
-        if temp < self.min {
-            self.min = temp
-        } else if temp > self.max {
-            self.max = temp
-        }
+        self.min = std::cmp::min(self.min, temp);
+        self.max = std::cmp::max(self.max, temp);
 
         // we're going to do a lot of calls to update_values(), so instead of computing the average
         // each time. We'll just keep a running total and a count of all the temps we've seen. Then
         // at the end of the process, we'll compute the average once.
-        self.running_total += temp as u32;
+        self.running_total += temp as i32;
         self.count += 1;
     }
 
     #[inline]
     pub fn average(&self) -> f32 {
-        let f = self.running_total as f32 / self.mutliplier;
+        let f = self.running_total as f32 / self.mutliplier as f32;
         let ave = f / self.count as f32;
         return ave;
     }
 
     pub fn to_string(&self) -> String {
-        format!("{}={}/{}/{}", self.name, self.min, self.average(), self.max)
+        format!(
+            "{}={}/{}/{}",
+            self.from_bytes(),
+            self.min as f32 / self.mutliplier as f32,
+            self.average(),
+            self.max as f32 / self.mutliplier as f32
+        )
+    }
+
+    fn from_bytes(&self) -> &str {
+        std::str::from_utf8(&self.name[..100]).unwrap()
     }
 }
 
 impl Default for StationAverage {
     fn default() -> Self {
         StationAverage {
-            name: String::from(""),
+            name: [0u8; 100],
             min: 0,
             max: 0,
             count: 0,
             running_total: 0,
-            mutliplier: 100.0,
+            mutliplier: 10,
         }
     }
 }

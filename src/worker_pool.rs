@@ -1,6 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
+    time::Instant,
 };
 
 use crate::{container::Container, station::StationAverage};
@@ -10,6 +11,7 @@ pub struct Worker {
     rec_chan: Receiver<String>,
     container: Container,
     output: String,
+    timings: Vec<u128>,
 }
 
 impl Worker {
@@ -18,20 +20,22 @@ impl Worker {
             rec_chan: chan,
             container: Container::new(),
             output: out,
+            timings: Vec::new(),
         }
     }
 
     pub fn listen(&mut self) {
+        let mut counter = 0;
         while let Ok(line) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
             let bytes = line.as_bytes();
-            let sep = bytes.iter().position(|&b| b == b';').unwrap();
-            let name = line[..sep].to_string();
+            let sep = self.get_sep(bytes);
+            let name = &line[..sep];
             let value = &line[sep + 1..];
             let value = self.parse_string_to_int(value);
             if let Some(existing) = self.container.get_mut(&name) {
                 existing.update_values(value);
             } else {
-                let station_ave = StationAverage::new(name.clone(), value);
+                let station_ave = StationAverage::new(name.to_string(), value);
                 self.container.insert(station_ave, &name);
             }
         }
@@ -39,29 +43,36 @@ impl Worker {
     }
 
     #[inline]
+    fn get_sep(&self, bytes: &[u8]) -> usize {
+        let size = bytes.len();
+        if bytes[size - 4] == b';' {
+            size - 4
+        } else if bytes[size - 5] == b';' {
+            size - 5
+        } else {
+            size - 6
+        }
+    }
+
+    #[inline(always)]
     fn parse_string_to_int(&self, val: &str) -> i16 {
-        let mut is_negative = false;
-        let mut integer_part = 0;
-        for char in val.chars() {
-            if char == '-' {
-                is_negative = true;
-                continue;
-            }
-            match char {
-                '0'..='9' => {
-                    let digit = (char as u8 - b'0') as i16;
-                    integer_part = integer_part * 10 + digit;
-                }
-                '.' => {
-                    continue;
-                }
-                _ => {}
-            }
+        let bytes = val.as_bytes();
+        let byte_len = bytes.len();
+        let frac_part = bytes[byte_len - 1] as i16;
+        let mut int_part = 0;
+        let is_neg = (bytes[0] == b'-') as usize;
+        let mut index = is_neg;
+        let max_index = byte_len - 2;
+        while index < max_index {
+            int_part = int_part * 10 + (bytes[index] - b'0') as i16;
+            index += 1;
+        };
+        int_part = int_part * 10 + frac_part;
+        if is_neg == 1 {
+            -int_part
+        } else {
+            int_part
         }
-        if is_negative {
-            return -integer_part;
-        }
-        return integer_part;
     }
 
     fn write(&mut self) {
@@ -80,5 +91,14 @@ impl Worker {
                 None => {}
             }
         }
+        // let file = OpenOptions::new()
+        //     .create(true)
+        //     .append(true)
+        //     .open("loop_times_better_parser_totally_branchless.txt")
+        //     .unwrap();
+        // let mut writer = BufWriter::new(file);
+        // for data in &self.timings {
+        //     writeln!(writer, "{},", data).unwrap();
+        // }
     }
 }

@@ -9,7 +9,7 @@ mod worker_pool;
 fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
     let data = format!("{}/{}", base, "measurements.txt");
-    let output = format!("{}/{}", base, "output_sixth_pass.txt");
+    let output = format!("{}/{}", base, "output_seventh_pass.txt");
     let (send, rec) = bounded(100_000_000);
     let mut worker = Worker::new(rec, output);
     let handle = std::thread::spawn(move || {
@@ -21,8 +21,8 @@ fn main() {
         Ok(_) => {
             println!("Closed")
         }
-        Err(e) => {
-            eprintln!("{:?}", e)
+        Err(_e) => {
+            // eprintln!("{:?}", e)
         }
     }
     let end = start.elapsed();

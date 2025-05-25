@@ -3,16 +3,16 @@ use fxhash;
 use crate::station::StationAverage;
 
 pub struct Container {
-    pub backing: Vec<Option<StationAverage>>,
+    pub backing: [Option<StationAverage>; 5_000],
     size: usize,
 }
 
 impl Container {
     pub fn new() -> Self {
-        let backing_array = vec![None; 10_000];
+        let backing_array = [None::<StationAverage>; 5_000];
         return Container {
             backing: backing_array,
-            size: 10_000,
+            size: 5_000,
         };
     }
 
@@ -25,12 +25,6 @@ impl Container {
     pub fn sort(&mut self) {
         self.backing.sort();
     }
-
-    // pub fn get(&self, key: &str) -> Option<&T> {
-    //     let hash = fxhash::hash(key);
-    //     let index = hash % self.size;
-    //     self.backing.get(index)
-    // }
 
     #[inline]
     pub fn get_mut(&mut self, key: &str) -> Option<&mut StationAverage> {
