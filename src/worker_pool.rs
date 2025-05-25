@@ -7,14 +7,14 @@ use crate::{container::Container, station::StationAverage};
 use crossbeam::channel::Receiver;
 
 pub struct Worker {
-    rec_chan: Receiver<String>,
+    rec_chan: Receiver<Vec<u8>>,
     container: Container,
     output: String,
     timeings: Vec<u128>
 }
 
 impl Worker {
-    pub fn new(chan: Receiver<String>, out: String) -> Self {
+    pub fn new(chan: Receiver<Vec<u8>>, out: String) -> Self {
         Worker {
             rec_chan: chan,
             container: Container::new(),
@@ -25,18 +25,17 @@ impl Worker {
 
     pub fn listen(&mut self) {
         let mut counter = 0;
-        while let Ok(line) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
+        while let Ok(bytes) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
             // let start = Instant::now();
-            let bytes = line.as_bytes();
-            let sep = self.get_sep(bytes);
-            let name = &line[..sep];
-            let value = &line[sep + 1..];
+            let sep = self.get_sep(&bytes);
+            let name = &bytes[..sep];
+            let value = &bytes[sep + 1..];
             let value = self.parse_string_to_int(value);
-            if let Some(existing) = self.container.get_mut(&name) {
+            if let Some(existing) = self.container.get_mut(name) {
                 existing.update_values(value);
             } else {
-                let station_ave = StationAverage::new(name.to_string(), value);
-                self.container.insert(station_ave, &name);
+                let station_ave = StationAverage::new(name, value);
+                self.container.insert(station_ave, name);
             }
             // counter += 1;
             // if counter % 100 == 0 {
@@ -60,8 +59,7 @@ impl Worker {
     }
 
     #[inline(always)]
-    fn parse_string_to_int(&self, val: &str) -> i16 {
-        let bytes = val.as_bytes();
+    fn parse_string_to_int(&self, bytes: &[u8]) -> i16 {
         let byte_len = bytes.len();
         let frac_part = (bytes[byte_len - 1] -b'0') as i16;
         let mut int_part = 0;
@@ -99,7 +97,7 @@ impl Worker {
         // let file = OpenOptions::new()
         // .create(true)
         // .append(true)
-        // .open("jemalloc_loop_time.txt")
+        // .open("no_strings_loop_time.txt")
         // .unwrap();
         // let mut writer = BufWriter::new(file);
         // for data in &self.timeings {

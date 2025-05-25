@@ -17,7 +17,7 @@ impl Container {
     }
 
     #[inline(always)]
-    pub fn insert(&mut self, element: StationAverage, key: &str) {
+    pub fn insert(&mut self, element: StationAverage, key: &[u8]) {
         let index = self.compute_index(key);
         self.backing[index] = Some(element);
     }
@@ -27,13 +27,13 @@ impl Container {
     }
 
     #[inline(always)]
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut StationAverage> {
+    pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut StationAverage> {
         let index = self.compute_index(key);
         self.backing.get_mut(index).unwrap().as_mut()
     }
 
     #[inline(always)]
-    fn compute_index(&self, key: &str) -> usize {
+    fn compute_index(&self, key: &[u8]) -> usize {
         let hash = fxhash::hash(key);
         let index = hash % self.size;
         index

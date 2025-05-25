@@ -31,10 +31,9 @@ impl Ord for StationAverage {
 impl Eq for StationAverage {}
 
 impl StationAverage {
-    pub fn new(name: String, temp: i16) -> Self {
+    pub fn new(name: &[u8], temp: i16) -> Self {
         let mut arr = [0u8; MAX_ARRAY_SIZE];
-        let s = name.as_bytes();
-        arr[..s.len()].copy_from_slice(&s[..s.len()]);
+        arr[..name.len()].copy_from_slice(&name[..name.len()]);
         StationAverage {
             name: arr,
             min: temp,
@@ -92,7 +91,7 @@ mod tests {
     #[test]
     fn test_updating() {
         const EPS: f32 = 1e-6;
-        let mut station_average = StationAverage::new("Test".to_string(), 100);
+        let mut station_average = StationAverage::new("Test".as_bytes(), 100);
         assert_eq!(station_average.average(), 10.0);
         assert_eq!(station_average.max, 100);
         assert_eq!(station_average.min, 100);
