@@ -1,3 +1,5 @@
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use crossbeam::channel::bounded;
 use std::time;
 use worker_pool::Worker;

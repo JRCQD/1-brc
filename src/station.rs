@@ -42,7 +42,7 @@ impl StationAverage {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn update_values(&mut self, temp: i16) {
         if temp < self.min {
             self.min = temp
