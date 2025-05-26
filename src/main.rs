@@ -1,8 +1,8 @@
 // #[global_allocator]
 // static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+use ring_buffer::channel;
 use std::time;
 use worker_pool::{Worker, CHANNEL_SIZE};
-use ring_buffer::channel;
 mod container;
 mod reader;
 mod ring_buffer;
@@ -12,8 +12,8 @@ mod worker_pool;
 fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
     let data = format!("{}/{}", base, "measurements.txt");
-    let output = format!("{}/{}", base, "output_no_strings.txt");
-    let (send, rec) = channel::<Vec<u8>, CHANNEL_SIZE>(); 
+    let output = format!("{}/{}", base, "output_ring_buffer.txt");
+    let (send, rec) = channel::<Vec<u8>, CHANNEL_SIZE>();
     // let (send, rec) = bounded(100_000_000);
     let mut worker = Worker::new(rec, output);
     let handle = std::thread::spawn(move || {

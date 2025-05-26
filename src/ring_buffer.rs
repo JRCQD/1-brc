@@ -9,8 +9,19 @@ struct Slot<T> {
 }
 
 impl<T> Slot<T> {
-    fn new(value: T) -> Self {
+    fn new() -> Self {
         unsafe { Slot { ready: AtomicBool::new(false), value: UnsafeCell::new(MaybeUninit::uninit().assume_init()) } }
+    }
+
+    fn get(&self) -> T {
+        let val = unsafe { (*self.value.get()).assume_init_read() };
+        self.ready.store(false, Ordering::Release);
+        val
+    }
+
+    fn write(&self, value: T) {
+        unsafe { (*self.value.get()).write(value) };
+        self.ready.store(true, Ordering::Release);
     }
 }
 
@@ -30,18 +41,20 @@ impl<T, const N: usize> Producer<T, N> {
 
         if head.wrapping_sub(tail) >= N {
             println!("index: {} now wrapping", index);
+            println!("head: {}, tail: {}", head, tail);
             return Err(elem);
         };
 
         unsafe {
             // Using the index, get the &UnsafeCell<MaybeUninit<T>> from the buffer
             // .get(); then takes gets the MaybeUninit<T> from the UnsafeCell
-            let cell = self.inner.buffer.get_unchecked(index).get();
-            // .write... writes the the cell
-            (*cell).write(Some(elem));
+            if !self.inner.buffer.get_unchecked(index).ready.load(Ordering::Acquire) {
+                self.inner.buffer.get_unchecked(index).write(elem);
+                self.inner.head.store(head.wrapping_add(1), Ordering::Release);
+            } else {
+                return Err(elem)
+            }
         }
-
-        self.inner.head.store(head.wrapping_add(1), Ordering::Release);
         Ok(())
     }
 }
@@ -79,9 +92,10 @@ impl<T, const N: usize> Consumer<T,N> {
                 // get the value without there being any racing between different threads.
                 let index = tail % N;
                 unsafe {
-                    let cell = self.inner.buffer.get_unchecked(index).get();
-                    let value = (*cell).assume_init_read().take();
-                    return value;
+                    let cell = self.inner.buffer.get_unchecked(index);
+                    if cell.ready.load(Ordering::Acquire) {
+                        return Some(cell.get());
+                    }
                 }
             }
         }
@@ -89,7 +103,7 @@ impl<T, const N: usize> Consumer<T,N> {
 }
 
 pub struct RingBuffer<T, const N: usize> {
-    buffer: [UnsafeCell<MaybeUninit<Option<T>>>; N],
+    buffer: [Slot<T>; N],
     head: AtomicUsize,
     tail: AtomicUsize,
     closed: AtomicBool,
@@ -99,13 +113,7 @@ unsafe impl<T: Send, const N: usize> Sync for RingBuffer<T, N> {}
 
 impl<T, const N: usize> RingBuffer<T, N> {
     pub fn new() -> Self {
-        let buffer = unsafe {
-            let mut result: [UnsafeCell<MaybeUninit<Option<T>>>; N] = MaybeUninit::uninit().assume_init();
-            for i in 0..N {
-                result[i] = UnsafeCell::new(MaybeUninit::uninit().assume_init())
-            }
-            result
-        };
+        let buffer = std::array::from_fn(|_| Slot::new());
         RingBuffer {
             buffer,
             head: AtomicUsize::new(0),
@@ -126,8 +134,23 @@ mod tests {
     use super::*;
     #[test]
     fn test_enqueue_dequeue() {
-        let (prod, con) = channel::<Vec<u8>, 1>();
+        let (prod, con) = channel::<Vec<u8>, 1_000>();
         prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
-        con.try_dequeue();
+        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
+        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+    }
+
+    #[test]
+    fn test_drop_work() {
+        let (prod, con) = channel::<Vec<u8>, 1_000>();
+        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
+        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
+        // Without this, the test hangs, this is the correct behaviour as we want the consumers to
+        // loop while a producer still exists
+        drop(prod);
+        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+        assert_eq!(None, con.try_dequeue());
     }
 }
