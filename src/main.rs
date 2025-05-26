@@ -13,20 +13,22 @@ fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
     let data = format!("{}/{}", base, "measurements.txt");
     let output = format!("{}/{}", base, "output_ring_buffer.txt");
+    let mut handles = vec![];
     let (send, rec) = channel::<Vec<u8>>(10_000_000);
     // let (send, rec) = bounded(100_000_000);
-    let mut worker = Worker::new(rec, output);
-    let handle = std::thread::spawn(move || {
-        worker.listen();
-    });
+    for _ in 1..10 {
+        let mut worker = Worker::new(rec.clone(), output.clone());
+        let handle = std::thread::spawn(move || {
+            worker.listen();
+        });
+        handles.push(handle);
+    }
     let start = time::Instant::now();
     reader::parse_file_with_buf(data, send);
-    match handle.join() {
-        Ok(_) => {
-            println!("Closed")
-        }
-        Err(e) => {
-            eprintln!("[err] {:?}", e)
+    for handle in handles {
+        match handle.join() {
+            Ok(_) => println!("compeleted"),
+            Err(e) =>  eprintln!("join error: {:?}", e)
         }
     }
     let end = start.elapsed();
