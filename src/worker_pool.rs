@@ -4,17 +4,16 @@ use std::{
     sync::Arc,
 };
 
-pub const CHANNEL_SIZE: usize = 570_000;
 use crate::{container::Container, ring_buffer::Consumer, station::StationAverage};
 
 pub struct Worker {
-    rec_chan: Arc<Consumer<Vec<u8>, CHANNEL_SIZE>>,
+    rec_chan: Arc<Consumer<Vec<u8>>>,
     container: Container,
     output: String,
 }
 
 impl Worker {
-    pub fn new(chan: Arc<Consumer<Vec<u8>, CHANNEL_SIZE>>, out: String) -> Self {
+    pub fn new(chan: Arc<Consumer<Vec<u8>>>, out: String) -> Self {
         Worker {
             rec_chan: chan,
             container: Container::new(),
@@ -25,11 +24,10 @@ impl Worker {
     pub fn listen(&mut self) {
         let mut counter = 0;
         while let Some(bytes) = self.rec_chan.try_dequeue() {
-            counter += 1;
-            // if counter % 10_000 == 0 {
+            // counter += 1;
+            // if counter % 1_000_000 == 0 {
             // println!("dequeuing {:?}", counter);
             // }
-            // println!("dequeuing {:?}", counter);
             // let start = Instant::now();
             let sep = self.get_sep(&bytes);
             let name = &bytes[..sep];
