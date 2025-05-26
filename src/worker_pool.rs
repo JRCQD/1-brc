@@ -1,11 +1,11 @@
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
-    sync::Arc
+    sync::Arc,
 };
 
-pub const CHANNEL_SIZE: usize = 1_000;
-use crate::{container::Container, station::StationAverage, ring_buffer::Consumer};
+pub const CHANNEL_SIZE: usize = 570_000;
+use crate::{container::Container, ring_buffer::Consumer, station::StationAverage};
 
 pub struct Worker {
     rec_chan: Arc<Consumer<Vec<u8>, CHANNEL_SIZE>>,
@@ -27,9 +27,9 @@ impl Worker {
         while let Some(bytes) = self.rec_chan.try_dequeue() {
             counter += 1;
             // if counter % 10_000 == 0 {
-                // println!("dequeuing {:?}", counter); 
+            // println!("dequeuing {:?}", counter);
             // }
-            println!("dequeuing {:?}", counter);
+            // println!("dequeuing {:?}", counter);
             // let start = Instant::now();
             let sep = self.get_sep(&bytes);
             let name = &bytes[..sep];

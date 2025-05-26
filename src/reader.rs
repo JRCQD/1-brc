@@ -5,7 +5,7 @@ use std::{
 
 use crate::ring_buffer::Producer;
 
-pub fn parse_file_with_buf(file: String, queue: Producer<Vec<u8>, 1_000>) {
+pub fn parse_file_with_buf(file: String, queue: Producer<Vec<u8>, 570_000>) {
     println!("{}", file);
     let file = File::open(file).unwrap();
     let mut reader = BufReader::new(file);
@@ -14,13 +14,18 @@ pub fn parse_file_with_buf(file: String, queue: Producer<Vec<u8>, 1_000>) {
         if let Some(&b'\n') = buffer.last() {
             buffer.pop();
         }
+        // println!("Before loop");
         loop {
+            // println!("Loop start");
             match queue.try_enqueue(buffer.clone()) {
                 Ok(_) => {
                     buffer.clear();
                     break;
                 }
-                Err(_e) => continue,
+                Err(_e) => {
+                    // println!("err");
+                    continue;
+                }
             }
         }
     }

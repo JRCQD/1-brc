@@ -1,16 +1,23 @@
 use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
-
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 
 struct Slot<T> {
     ready: AtomicBool,
-    value: UnsafeCell<MaybeUninit<T>>
+    value: UnsafeCell<MaybeUninit<T>>,
 }
 
 impl<T> Slot<T> {
     fn new() -> Self {
-        unsafe { Slot { ready: AtomicBool::new(false), value: UnsafeCell::new(MaybeUninit::uninit().assume_init()) } }
+        unsafe {
+            Slot {
+                ready: AtomicBool::new(false),
+                value: UnsafeCell::new(MaybeUninit::uninit().assume_init()),
+            }
+        }
     }
 
     fn get(&self) -> T {
@@ -26,13 +33,13 @@ impl<T> Slot<T> {
 }
 
 pub struct Producer<T, const N: usize> {
-    inner: Arc<RingBuffer<T, N>>
+    inner: Arc<RingBuffer<T, N>>,
 }
 
 impl<T, const N: usize> Producer<T, N> {
     pub fn try_enqueue(&self, elem: T) -> Result<(), T> {
-        let head = self.inner.head.load(Ordering::Relaxed);
-        let tail = self.inner.tail.load(Ordering::Acquire);
+        let head = self.inner.head.load(Ordering::SeqCst);
+        let tail = self.inner.tail.load(Ordering::SeqCst);
 
         // always take head index mod N to make sure the index is still
         // in the range of the buffer.
@@ -40,19 +47,27 @@ impl<T, const N: usize> Producer<T, N> {
         //println!("index: {}", index);
 
         if head.wrapping_sub(tail) >= N {
-            println!("index: {} now wrapping", index);
-            println!("head: {}, tail: {}", head, tail);
+            // println!("index: {} now wrapping", index);
+            // println!("head: {}, tail: {}", head, tail);
             return Err(elem);
         };
 
         unsafe {
             // Using the index, get the &UnsafeCell<MaybeUninit<T>> from the buffer
             // .get(); then takes gets the MaybeUninit<T> from the UnsafeCell
-            if !self.inner.buffer.get_unchecked(index).ready.load(Ordering::Acquire) {
+            if !self
+                .inner
+                .buffer
+                .get_unchecked(index)
+                .ready
+                .load(Ordering::Acquire)
+            {
                 self.inner.buffer.get_unchecked(index).write(elem);
-                self.inner.head.store(head.wrapping_add(1), Ordering::Release);
+                self.inner
+                    .head
+                    .store(head.wrapping_add(1), Ordering::Release);
             } else {
-                return Err(elem)
+                return Err(elem);
             }
         }
         Ok(())
@@ -67,17 +82,21 @@ impl<T, const N: usize> Drop for Producer<T, N> {
 }
 
 pub struct Consumer<T, const N: usize> {
-    inner: Arc<RingBuffer<T, N>>
+    inner: Arc<RingBuffer<T, N>>,
 }
 
-impl<T, const N: usize> Consumer<T,N> {
+impl<T, const N: usize> Consumer<T, N> {
     pub fn try_dequeue(&self) -> Option<T> {
         loop {
             let tail = self.inner.tail.load(Ordering::Relaxed);
             let head = self.inner.head.load(Ordering::Acquire);
 
-            if tail == head && self.inner.closed.load(Ordering::Acquire) {
-                return None;
+            if tail >= head {
+                if self.inner.closed.load(Ordering::Acquire) {
+                    return None;
+                } else {
+                    continue;
+                }
             }
 
             let next_tail = tail.wrapping_add(1);
@@ -126,7 +145,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
 pub fn channel<T, const N: usize>() -> (Producer<T, N>, Arc<Consumer<T, N>>) {
     let buf = Arc::new(RingBuffer::new());
     let buf_2 = buf.clone();
-    (Producer { inner: buf }, Arc::new(Consumer {inner: buf_2}))
+    (Producer { inner: buf }, Arc::new(Consumer { inner: buf_2 }))
 }
 
 #[cfg(test)]
@@ -135,22 +154,22 @@ mod tests {
     #[test]
     fn test_enqueue_dequeue() {
         let (prod, con) = channel::<Vec<u8>, 1_000>();
-        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
-        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
-        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
-        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+        prod.try_enqueue([1, 2, 3, 5].to_vec()).unwrap();
+        prod.try_enqueue([1, 2, 3, 5].to_vec()).unwrap();
+        assert_eq!(Some([1, 2, 3, 5].to_vec()), con.try_dequeue());
+        assert_eq!(Some([1, 2, 3, 5].to_vec()), con.try_dequeue());
     }
 
     #[test]
     fn test_drop_work() {
         let (prod, con) = channel::<Vec<u8>, 1_000>();
-        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
-        prod.try_enqueue([1,2,3,5].to_vec()).unwrap();
+        prod.try_enqueue([1, 2, 3, 5].to_vec()).unwrap();
+        prod.try_enqueue([1, 2, 3, 5].to_vec()).unwrap();
         // Without this, the test hangs, this is the correct behaviour as we want the consumers to
         // loop while a producer still exists
         drop(prod);
-        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
-        assert_eq!(Some([1,2,3,5].to_vec()), con.try_dequeue());
+        assert_eq!(Some([1, 2, 3, 5].to_vec()), con.try_dequeue());
+        assert_eq!(Some([1, 2, 3, 5].to_vec()), con.try_dequeue());
         assert_eq!(None, con.try_dequeue());
     }
 }

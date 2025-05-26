@@ -1,5 +1,5 @@
-// #[global_allocator]
-// static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use ring_buffer::channel;
 use std::time;
 use worker_pool::{Worker, CHANNEL_SIZE};
@@ -26,7 +26,7 @@ fn main() {
             println!("Closed")
         }
         Err(e) => {
-            eprintln!("{:?}", e)
+            eprintln!("[err] {:?}", e)
         }
     }
     let end = start.elapsed();
