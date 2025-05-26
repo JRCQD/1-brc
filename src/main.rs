@@ -1,10 +1,11 @@
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-use crossbeam::channel::bounded;
+// #[global_allocator]
+// static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use std::time;
-use worker_pool::Worker;
+use worker_pool::{Worker, CHANNEL_SIZE};
+use ring_buffer::channel;
 mod container;
 mod reader;
+mod ring_buffer;
 mod station;
 mod worker_pool;
 
@@ -12,7 +13,8 @@ fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
     let data = format!("{}/{}", base, "measurements.txt");
     let output = format!("{}/{}", base, "output_no_strings.txt");
-    let (send, rec) = bounded(100_000_000);
+    let (send, rec) = channel::<Vec<u8>, CHANNEL_SIZE>(); 
+    // let (send, rec) = bounded(100_000_000);
     let mut worker = Worker::new(rec, output);
     let handle = std::thread::spawn(move || {
         worker.listen();

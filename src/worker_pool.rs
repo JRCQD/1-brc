@@ -1,31 +1,32 @@
 use std::{
     fs::OpenOptions,
-    io::{BufWriter, Write}, time::Instant,
+    io::{BufWriter, Write},
+    sync::Arc
 };
 
-use crate::{container::Container, station::StationAverage};
-use crossbeam::channel::Receiver;
+pub const CHANNEL_SIZE: usize = 1;
+use crate::{container::Container, station::StationAverage, ring_buffer::Consumer};
 
 pub struct Worker {
-    rec_chan: Receiver<Vec<u8>>,
+    rec_chan: Arc<Consumer<Vec<u8>, CHANNEL_SIZE>>,
     container: Container,
     output: String,
-    timeings: Vec<u128>
 }
 
 impl Worker {
-    pub fn new(chan: Receiver<Vec<u8>>, out: String) -> Self {
+    pub fn new(chan: Arc<Consumer<Vec<u8>, CHANNEL_SIZE>>, out: String) -> Self {
         Worker {
             rec_chan: chan,
             container: Container::new(),
             output: out,
-            timeings: Vec::new()
         }
     }
 
     pub fn listen(&mut self) {
         let mut counter = 0;
-        while let Ok(bytes) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
+        while let Some(bytes) = self.rec_chan.try_dequeue() {
+            // counter += 1;
+            // println!("dequeuing {:?}", counter);
             // let start = Instant::now();
             let sep = self.get_sep(&bytes);
             let name = &bytes[..sep];
@@ -61,7 +62,7 @@ impl Worker {
     #[inline(always)]
     fn parse_string_to_int(&self, bytes: &[u8]) -> i16 {
         let byte_len = bytes.len();
-        let frac_part = (bytes[byte_len - 1] -b'0') as i16;
+        let frac_part = (bytes[byte_len - 1] - b'0') as i16;
         let mut int_part = 0;
         let is_neg = (bytes[0] == b'-') as usize;
         let mut index = is_neg;
@@ -69,7 +70,7 @@ impl Worker {
         while index < max_index {
             int_part = int_part * 10 + (bytes[index] - b'0') as i16;
             index += 1;
-        };
+        }
         int_part = int_part * 10 + frac_part;
         if is_neg == 1 {
             -int_part

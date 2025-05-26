@@ -64,7 +64,13 @@ impl StationAverage {
     }
 
     pub fn to_string(&self) -> String {
-        format!("{}={}/{}/{}", self.from_bytes(), self.min, self.average(), self.max)
+        format!(
+            "{}={}/{}/{}",
+            self.from_bytes(),
+            self.min,
+            self.average(),
+            self.max
+        )
     }
 
     fn from_bytes(&self) -> &str {

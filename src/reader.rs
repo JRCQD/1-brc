@@ -1,25 +1,11 @@
-use crossbeam::channel::Sender;
 use std::{
     fs::File,
     io::{BufRead, BufReader},
 };
 
-pub fn parse_file(file: String, queue: Sender<String>) {
-    println!("{}", file);
-    let file = File::open(file).unwrap();
-    let reader = BufReader::new(file);
-    for line in reader.lines() {
-        let line = line.unwrap();
-        match queue.send(line) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("{:?}", e)
-            }
-        }
-    }
-}
+use crate::ring_buffer::Producer;
 
-pub fn parse_file_with_buf(file: String, queue: Sender<Vec<u8>>) {
+pub fn parse_file_with_buf(file: String, queue: Producer<Vec<u8>, 1>){
     println!("{}", file);
     let file = File::open(file).unwrap();
     let mut reader = BufReader::new(file);
@@ -28,7 +14,16 @@ pub fn parse_file_with_buf(file: String, queue: Sender<Vec<u8>>) {
         if let Some(&b'\n') = buffer.last() {
             buffer.pop();
         }
-        queue.send(buffer.clone()).unwrap();
-        buffer.clear();
+        loop {
+        match queue.try_enqueue(buffer.clone()) {
+            Ok(_) => {
+                buffer.clear();
+                break
+            }
+            Err(_e) => {
+                continue
+            }
+        }
+        }
     }
 }
