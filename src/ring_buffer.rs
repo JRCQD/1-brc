@@ -5,6 +5,7 @@ use std::sync::{
     Arc,
 };
 
+#[repr(align(64))]
 struct Slot<T> {
     ready: AtomicBool,
     value: UnsafeCell<MaybeUninit<T>>,
@@ -133,9 +134,6 @@ unsafe impl<T: Send> Sync for RingBuffer<T> {}
 impl<T> RingBuffer<T> {
     pub fn new(capacity: usize) -> Self {
         let mut vec = Vec::with_capacity(capacity);
-        unsafe {
-            vec.set_len(capacity);
-        }
 
         for _ in 0..capacity {
             vec.push(Slot::new());
