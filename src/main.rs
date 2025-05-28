@@ -5,7 +5,6 @@ use std::time;
 mod container;
 mod reader;
 mod station;
-mod worker_pool;
 
 fn main() {
     let base = "/home/ryan/Documents/projects/one_brc";
