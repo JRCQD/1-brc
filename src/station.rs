@@ -64,11 +64,28 @@ impl StationAverage {
     }
 
     pub fn to_string(&self) -> String {
-        format!("{}={}/{}/{}", self.from_bytes(), self.min, self.average(), self.max)
+        format!(
+            "{}={}/{}/{}",
+            self.from_bytes(&mut String::new()),
+            self.min,
+            self.average(),
+            self.max
+        )
     }
 
-    fn from_bytes(&self) -> &str {
-        std::str::from_utf8(&self.name[..MAX_ARRAY_SIZE]).unwrap()
+    fn from_bytes(&self, str_buf: &mut String) -> String {
+        // This strips out the null bytes that might be inserted into the string
+        // compared to everything else, this will be very slow, but it's only called
+        // at most 10,000 times.
+        let name: Vec<u8> = self
+            .name
+            .iter()
+            .filter(|c| *(*c) == '\0' as u8)
+            .map(|c| *c)
+            .collect();
+        let x = std::str::from_utf8(&name[..MAX_ARRAY_SIZE]).unwrap();
+        str_buf.push_str(x);
+        str_buf.to_string()
     }
 }
 

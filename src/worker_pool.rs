@@ -1,6 +1,6 @@
 use std::{
     fs::OpenOptions,
-    io::{BufWriter, Write}, time::Instant,
+    io::{BufWriter, Write}, // time::Instant,
 };
 
 use crate::{container::Container, station::StationAverage};
@@ -10,7 +10,7 @@ pub struct Worker {
     rec_chan: Receiver<Vec<u8>>,
     container: Container,
     output: String,
-    timeings: Vec<u128>
+    // timeings: Vec<u128>
 }
 
 impl Worker {
@@ -19,12 +19,12 @@ impl Worker {
             rec_chan: chan,
             container: Container::new(),
             output: out,
-            timeings: Vec::new()
+            // timeings: Vec::new()
         }
     }
 
     pub fn listen(&mut self) {
-        let mut counter = 0;
+        // let mut counter = 0;
         while let Ok(bytes) = self.rec_chan.recv().map_err(|err| eprintln!("{:?}", err)) {
             // let start = Instant::now();
             let sep = self.get_sep(&bytes);
@@ -61,7 +61,7 @@ impl Worker {
     #[inline(always)]
     fn parse_string_to_int(&self, bytes: &[u8]) -> i16 {
         let byte_len = bytes.len();
-        let frac_part = (bytes[byte_len - 1] -b'0') as i16;
+        let frac_part = (bytes[byte_len - 1] - b'0') as i16;
         let mut int_part = 0;
         let is_neg = (bytes[0] == b'-') as usize;
         let mut index = is_neg;
@@ -69,7 +69,7 @@ impl Worker {
         while index < max_index {
             int_part = int_part * 10 + (bytes[index] - b'0') as i16;
             index += 1;
-        };
+        }
         int_part = int_part * 10 + frac_part;
         if is_neg == 1 {
             -int_part

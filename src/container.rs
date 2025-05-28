@@ -1,18 +1,18 @@
 use fxhash;
 
 use crate::station::StationAverage;
-
+const ARRAY_SIZE: usize = 1_000;
 pub struct Container {
-    pub backing: [Option<StationAverage>; 5_000],
+    pub backing: [Option<StationAverage>; ARRAY_SIZE],
     size: usize,
 }
 
 impl Container {
     pub fn new() -> Self {
-        let backing_array = [None::<StationAverage>; 5_000];
+        let backing_array = [None::<StationAverage>; ARRAY_SIZE];
         return Container {
             backing: backing_array,
-            size: 5_000,
+            size: ARRAY_SIZE,
         };
     }
 
