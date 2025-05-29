@@ -2,15 +2,15 @@ use crate::container::Container;
 use crate::station::StationAverage;
 use memmap2::Mmap;
 use std::{
-    fs::File,
-    sync::{
+    arch::x86_64::{__m128i, __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8}, fs::File, sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    }
+    }, time
 };
 
 const NUM_THREADS: usize = 8;
-const CHUNK_SIZE: usize = 1024;
+const CHUNK_SIZE: usize = 4096;
+const ARR_LENGTH: usize = 4096;
 
 pub fn read_with_mmap(file: String) {
     println!("{}", file);
@@ -36,6 +36,7 @@ pub fn read_with_mmap(file: String) {
 
 fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>) -> Container {
     let mut container = Container::new();
+    let mut line_break_positions: [Option<usize>; ARR_LENGTH] = [None; ARR_LENGTH];
     loop {
         let c = counter.fetch_add(CHUNK_SIZE, Ordering::AcqRel);
         if c >= file_size {
@@ -43,11 +44,16 @@ fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>) -> Conta
         }
         let (start_bound, end_bound) = find_start_end_bounds(&mmap, &c, file_size);
         let chunk = &mmap[c - CHUNK_SIZE + start_bound..end_bound];
-        let lines: Vec<&[u8]> = chunk.split(|b| *b == b'\n').collect();
-        for line in lines {
-            if line.len() < 1 {
-                continue;
+        let line_ends = unsafe { find_line_breaks(chunk, &mut line_break_positions) };
+        // let lines: Vec<&[u8]> = chunk.split(|b| *b == b'\n').collect();
+        let mut current = 0;
+        for pos in line_ends {
+            if pos.is_none() {
+                break
             }
+            let pos = pos.unwrap();
+            let line = &chunk[current..pos];
+            current = pos + 1;
             let sep = get_sep(line);
             let name = &line[..sep];
             let value = &line[sep + 1..];
@@ -92,6 +98,7 @@ fn parse_string_to_int(bytes: &[u8]) -> i16 {
     } else {
         int_part
     }
+
 }
 
 #[inline(always)]
@@ -121,6 +128,41 @@ fn find_start_end_bounds(mmap: &Mmap, c: &usize, file_size: usize) -> (usize, us
             c + CHUNK_SIZE + ending_offset
         }
     };
-
     return (additional_offset, end_chunk);
+}
+
+#[inline(always)]
+unsafe fn find_line_breaks<'a>(chunk: &[u8], new_lines: &'a mut [Option<usize>; ARR_LENGTH]) -> &'a mut [Option<usize>; ARR_LENGTH] {
+    const REG_WIDTH: usize = 16;
+    let mut i = 0;
+    let needle = _mm_set1_epi8(b'\n' as i8);
+    let mut counter = 0;
+    while i + REG_WIDTH <= chunk.len() {
+        let c = _mm_loadu_si128(chunk.as_ptr().add(i) as *const __m128i);
+        let cmpr = _mm_cmpeq_epi8(c, needle);
+        let mask = _mm_movemask_epi8(cmpr);
+
+        if mask != 0 {
+            for j in 0..REG_WIDTH {
+                if (mask & (1 << j)) != 0 {
+                    new_lines[counter] = Some(i + j);
+                    counter += 1;
+                }
+            }
+        }
+        i += REG_WIDTH;
+    }
+
+    while i < chunk.len() {
+        if chunk[i] == b'\n' {
+            new_lines[counter] = Some(i);
+            counter += 1;
+        }
+        i += 1;
+    }
+    while counter < ARR_LENGTH {
+        new_lines[counter] = None;
+        counter += 1;
+    }
+    new_lines
 }

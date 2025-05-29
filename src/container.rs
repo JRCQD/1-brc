@@ -2,6 +2,7 @@ use fxhash;
 
 use crate::station::StationAverage;
 const ARRAY_SIZE: usize = 1 << 10;
+#[repr(C)]
 pub struct Container {
     pub backing: [Option<StationAverage>; ARRAY_SIZE],
     size: usize,
