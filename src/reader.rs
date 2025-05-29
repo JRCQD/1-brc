@@ -6,7 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    },
+    }
 };
 
 const NUM_THREADS: usize = 8;
@@ -41,31 +41,8 @@ fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>) -> Conta
         if c >= file_size {
             break;
         }
-        let mut additional_offset: usize = 0;
-        // check if we're at the start of a line
-        if c - CHUNK_SIZE > 0 && mmap[c - CHUNK_SIZE - 1] != b'\n' {
-            // if the first character from where we start isn't a new line, then we're not
-            // at the start of a line, and another thread has read this line. So we read to
-            // the start of the next line.
-            while mmap[c - CHUNK_SIZE + additional_offset] != b'\n' {
-                additional_offset += 1
-            }
-            additional_offset += 1;
-        }
-        let mut ending_offset: usize = 0;
-        while (c + CHUNK_SIZE + ending_offset) < file_size && mmap[c + CHUNK_SIZE + ending_offset] != b'\n'
-        {
-            ending_offset += 1;
-        }
-
-        let end_chunk = {
-            if c+CHUNK_SIZE + ending_offset > file_size {
-                file_size
-            } else {
-                c+CHUNK_SIZE + ending_offset
-            }
-        };
-        let chunk = &mmap[c - CHUNK_SIZE + additional_offset..end_chunk];
+        let (start_bound, end_bound) = find_start_end_bounds(&mmap, &c, file_size);
+        let chunk = &mmap[c - CHUNK_SIZE + start_bound..end_bound];
         let lines: Vec<&[u8]> = chunk.split(|b| *b == b'\n').collect();
         for line in lines {
             if line.len() < 1 {
@@ -115,4 +92,35 @@ fn parse_string_to_int(bytes: &[u8]) -> i16 {
     } else {
         int_part
     }
+}
+
+#[inline(always)]
+fn find_start_end_bounds(mmap: &Mmap, c: &usize, file_size: usize) -> (usize, usize) {
+    let mut additional_offset: usize = 0;
+    // check if we're at the start of a line
+    if c - CHUNK_SIZE > 0 && mmap[c - CHUNK_SIZE - 1] != b'\n' {
+        // if the first character from where we start isn't a new line, then we're not
+        // at the start of a line, and another thread has read this line. So we read to
+        // the start of the next line.
+        while mmap[c - CHUNK_SIZE + additional_offset] != b'\n' {
+            additional_offset += 1
+        }
+        additional_offset += 1;
+    }
+    let mut ending_offset: usize = 0;
+    while (c + CHUNK_SIZE + ending_offset) < file_size
+        && mmap[c + CHUNK_SIZE + ending_offset] != b'\n'
+    {
+        ending_offset += 1;
+    }
+
+    let end_chunk = {
+        if c + CHUNK_SIZE + ending_offset > file_size {
+            file_size
+        } else {
+            c + CHUNK_SIZE + ending_offset
+        }
+    };
+
+    return (additional_offset, end_chunk);
 }

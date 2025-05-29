@@ -1,7 +1,7 @@
 use fxhash;
 
 use crate::station::StationAverage;
-const ARRAY_SIZE: usize = 1_000;
+const ARRAY_SIZE: usize = 1 << 10;
 pub struct Container {
     pub backing: [Option<StationAverage>; ARRAY_SIZE],
     size: usize,
@@ -22,20 +22,16 @@ impl Container {
         self.backing[index] = Some(element);
     }
 
-    pub fn sort(&mut self) {
-        self.backing.sort();
-    }
-
     #[inline(always)]
     pub fn get_mut(&mut self, key: &[u8]) -> Option<&mut StationAverage> {
         let index = self.compute_index(key);
-        self.backing.get_mut(index).unwrap().as_mut()
+        unsafe { self.backing.get_unchecked_mut(index).as_mut() }
     }
 
     #[inline(always)]
     fn compute_index(&self, key: &[u8]) -> usize {
         let hash = fxhash::hash(key);
-        let index = hash % self.size;
+        let index = hash & (self.size - 1);
         index
     }
 }
