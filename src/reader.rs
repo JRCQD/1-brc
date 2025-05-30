@@ -1,31 +1,57 @@
 use crate::container::Container;
-use crate::station::StationAverage;
+use libc::{mmap, MAP_PRIVATE, MAP_POPULATE, PROT_READ, MADV_SEQUENTIAL};
 use memmap2::Mmap;
 use std::{
-    arch::x86_64::{__m128i, __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8}, fs::File, sync::{
+    os::unix::io::AsRawFd, ptr,
+    arch::x86_64::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8}, fs::File, sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    }, time
+    }
 };
+use affinity::{self, set_thread_affinity};
 
 const NUM_THREADS: usize = 8;
-const CHUNK_SIZE: usize = 4096;
-const ARR_LENGTH: usize = 4096;
+const CHUNK_SIZE: usize = 1 << 16;
+const ARR_LENGTH: usize = 1 << 16;
+
+fn mmap_file(file: File) -> (&'static [u8], usize){
+    let size = file.metadata().unwrap().len() as usize;
+    unsafe {
+        let ptr = mmap(
+            ptr::null_mut(),
+            size,
+            PROT_READ,
+            MAP_PRIVATE | MADV_SEQUENTIAL,  // Pre-populates pages
+            file.as_raw_fd(),
+            0,
+        );
+
+        if ptr == libc::MAP_FAILED {
+            panic!("mmap failed");
+        }
+
+        (std::slice::from_raw_parts(ptr as *const u8, size), size)
+    }
+}
 
 pub fn read_with_mmap(file: String) {
     println!("{}", file);
     let file = File::open(file).unwrap();
     let mmap = unsafe { Mmap::map(&file).unwrap() };
     let mmap = Arc::new(mmap);
-
+    let cores: Arc<Vec<usize>> = Arc::new((0..affinity::get_core_num()).collect());
     let file_size = mmap.len();
 
     let mut handles = vec![];
     let counter = Arc::new(AtomicUsize::new(CHUNK_SIZE));
-    for _ in 0..NUM_THREADS {
+    for i in 0..NUM_THREADS {
         let mmap = mmap.clone();
         let c = counter.clone();
-        let h = std::thread::spawn(move || worker(mmap, file_size, c));
+        let cores = cores.clone();
+        let h = std::thread::spawn(move || {
+            set_thread_affinity([cores[i]]).unwrap();
+            worker(mmap, file_size, c, i);
+        });
         handles.push(h);
     }
 
@@ -34,9 +60,10 @@ pub fn read_with_mmap(file: String) {
     }
 }
 
-fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>) -> Container {
+fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>, _worker_id: usize) -> Container {
     let mut container = Container::new();
     let mut line_break_positions: [Option<usize>; ARR_LENGTH] = [None; ARR_LENGTH];
+    // println!("worker: {} is pinned to {:?}", worker_id, get_thread_affinity().unwrap());
     loop {
         let c = counter.fetch_add(CHUNK_SIZE, Ordering::AcqRel);
         if c >= file_size {
@@ -58,12 +85,7 @@ fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>) -> Conta
             let name = &line[..sep];
             let value = &line[sep + 1..];
             let value = parse_string_to_int(value);
-            if let Some(existing) = container.get_mut(name) {
-                existing.update_values(value);
-            } else {
-                let station_ave = StationAverage::new(name, value);
-                container.insert(station_ave, name);
-            }
+            container.update(name, value);
         }
     }
     container
@@ -81,15 +103,15 @@ fn get_sep(bytes: &[u8]) -> usize {
     }
 }
 #[inline(always)]
-fn parse_string_to_int(bytes: &[u8]) -> i16 {
+pub fn parse_string_to_int(bytes: &[u8]) -> i16 {
     let byte_len = bytes.len();
-    let frac_part = (bytes[byte_len - 1] - b'0') as i16;
+    let frac_part = (bytes[byte_len - 1] ^ 0x30) as i16;
     let mut int_part = 0;
-    let is_neg = (bytes[0] == b'-') as usize;
+    let is_neg = (bytes[0] == 0x30) as usize;
     let mut index = is_neg;
     let max_index = byte_len - 2;
     while index < max_index {
-        int_part = int_part * 10 + (bytes[index] - b'0') as i16;
+        int_part = int_part * 10 + (bytes[index] ^ 0x30) as i16;
         index += 1;
     }
     int_part = int_part * 10 + frac_part;
@@ -98,7 +120,6 @@ fn parse_string_to_int(bytes: &[u8]) -> i16 {
     } else {
         int_part
     }
-
 }
 
 #[inline(always)]
@@ -140,19 +161,25 @@ unsafe fn find_line_breaks<'a>(chunk: &[u8], new_lines: &'a mut [Option<usize>; 
     while i + REG_WIDTH <= chunk.len() {
         let c = _mm_loadu_si128(chunk.as_ptr().add(i) as *const __m128i);
         let cmpr = _mm_cmpeq_epi8(c, needle);
-        let mask = _mm_movemask_epi8(cmpr);
-
-        if mask != 0 {
-            for j in 0..REG_WIDTH {
-                if (mask & (1 << j)) != 0 {
-                    new_lines[counter] = Some(i + j);
-                    counter += 1;
-                }
-            }
-        }
+        let mut mask = _mm_movemask_epi8(cmpr);
+       // if mask != 0 {
+       //     for j in 0..REG_WIDTH {
+       //         if (mask & (1 << j)) != 0 {
+       //             new_lines[counter] = Some(i + j);
+       //             counter += 1;
+       //         }
+       //     }
+       // }
+       //
+       // I asked ChatGPT for a branchless version for this, and it gave me the following.
+       while mask != 0 {
+           let tz = mask.trailing_zeros() as usize;
+           new_lines[counter] = Some(i +tz);
+           counter += 1;
+           mask &= mask - 1;
+       }
         i += REG_WIDTH;
     }
-
     while i < chunk.len() {
         if chunk[i] == b'\n' {
             new_lines[counter] = Some(i);
