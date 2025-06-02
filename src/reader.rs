@@ -1,8 +1,6 @@
 use crate::container::Container;
-use libc::{mmap, MAP_PRIVATE, MAP_POPULATE, PROT_READ, MADV_SEQUENTIAL};
 use memmap2::Mmap;
 use std::{
-    os::unix::io::AsRawFd, ptr,
     arch::x86_64::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8}, fs::File, sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -14,25 +12,7 @@ const NUM_THREADS: usize = 8;
 const CHUNK_SIZE: usize = 1 << 16;
 const ARR_LENGTH: usize = 1 << 16;
 
-fn mmap_file(file: File) -> (&'static [u8], usize){
-    let size = file.metadata().unwrap().len() as usize;
-    unsafe {
-        let ptr = mmap(
-            ptr::null_mut(),
-            size,
-            PROT_READ,
-            MAP_PRIVATE | MADV_SEQUENTIAL,  // Pre-populates pages
-            file.as_raw_fd(),
-            0,
-        );
 
-        if ptr == libc::MAP_FAILED {
-            panic!("mmap failed");
-        }
-
-        (std::slice::from_raw_parts(ptr as *const u8, size), size)
-    }
-}
 
 pub fn read_with_mmap(file: String) {
     println!("{}", file);
