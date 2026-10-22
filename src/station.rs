@@ -3,6 +3,7 @@ const MAX_ARRAY_SIZE: usize = 100;
 #[derive(Clone, Debug, Copy)]
 pub struct StationAverage {
     pub name: [u8; MAX_ARRAY_SIZE],
+    name_len: u8,
     min: i16,
     max: i16,
     count: u32,
@@ -36,12 +37,28 @@ impl StationAverage {
         arr[..name.len()].copy_from_slice(&name[..name.len()]);
         StationAverage {
             name: arr,
+            name_len: name.len() as u8,
             min: temp,
             max: temp,
             count: 1,
             running_total: temp as u32,
             mutliplier: 10.0,
         }
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    #[inline(always)]
+    pub fn matches_name(&self, name: &[u8]) -> bool {
+        self.name_len as usize == name.len()
+            && self.name[..self.name_len as usize] == *name
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
     }
 
     #[inline(always)]
@@ -93,6 +110,7 @@ impl Default for StationAverage {
     fn default() -> Self {
         StationAverage {
             name: [0; MAX_ARRAY_SIZE],
+            name_len: 0,
             min: 0,
             max: 0,
             count: 0,

@@ -27,13 +27,45 @@ impl Container {
 
     #[inline(always)]
     pub fn update(&mut self, key: &[u8], element: i16) {
-        let index = self.compute_index(key);
-        unsafe { self.backing.get_unchecked_mut(index).update_values(element); };
+        let mut index = self.compute_index(key);
+
+        for _ in 0..self.size {
+            let station = &mut self.backing[index];
+
+            if station.is_empty() {
+                *station = StationAverage::new(key, element);
+                return;
+            }
+
+            if station.matches_name(key) {
+                station.update_values(element);
+                return;
+            }
+
+            index = (index + 1) & (self.size - 1);
+        }
+
+        panic!("station table is full");
     }
 
-    pub fn get(&self, key: &[u8]) -> StationAverage {
-        let idx = self.compute_index(key);
-        self.backing[idx]
+    pub fn get(&self, key: &[u8]) -> Option<&StationAverage> {
+        let mut index = self.compute_index(key);
+
+        for _ in 0..self.size {
+            let station = &self.backing[index];
+
+            if station.is_empty() {
+                return None;
+            }
+
+            if station.matches_name(key) {
+                return Some(station);
+            }
+
+            index = (index + 1) & (self.size - 1);
+        }
+
+        None
     }
 
     #[inline(always)]
@@ -50,7 +82,7 @@ impl Container {
         let fnv_prime = 0x100000001b3;
         for b in key {
             hash = hash ^ (*b as u64);
-            hash = hash * fnv_prime;
+            hash = hash.wrapping_mul(fnv_prime);
         }
         hash as usize
     }
@@ -85,7 +117,7 @@ pub fn read_with_mmap(file: String) {
     }
 
     for h in handles {
-        let _containter = h.join().unwrap();
+        let _ = h.join().unwrap();
     }
 }
 
@@ -219,7 +251,7 @@ unsafe fn find_line_breaks<'a>(chunk: &[u8], new_lines: &'a mut [Option<usize>; 
 
 #[cfg(test)]
 mod tests {
-    use super::find_start_end_bounds;
+    use super::{find_start_end_bounds, Container, ARRAY_SIZE};
 
     #[test]
     fn chunk_ranges_assign_each_line_once() {
@@ -233,5 +265,32 @@ mod tests {
         }
 
         assert_eq!(reconstructed, bytes);
+    }
+
+    #[test]
+    fn linear_probing_keeps_colliding_stations_separate() {
+        let mut container = Container::new();
+        let mut first_key_for_index: Vec<Option<Vec<u8>>> = vec![None; ARRAY_SIZE];
+        let mut collision = None;
+
+        for number in 0..=ARRAY_SIZE {
+            let key = format!("station-{number}").into_bytes();
+            let index = container.compute_index(&key);
+
+            if let Some(first_key) = &first_key_for_index[index] {
+                collision = Some((first_key.clone(), key));
+                break;
+            }
+
+            first_key_for_index[index] = Some(key);
+        }
+
+        let (first_key, second_key) = collision.expect("pigeonhole principle guarantees a collision");
+        container.update(&first_key, 100);
+        container.update(&second_key, 200);
+        container.update(&first_key, 300);
+
+        assert_eq!(container.get(&first_key).unwrap().count(), 2);
+        assert_eq!(container.get(&second_key).unwrap().count(), 1);
     }
 }
