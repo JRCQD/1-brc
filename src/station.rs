@@ -7,7 +7,7 @@ pub struct StationAverage {
     min: i16,
     max: i16,
     count: u32,
-    running_total: u32,
+    running_total: i64,
     mutliplier: f32,
 }
 
@@ -41,7 +41,7 @@ impl StationAverage {
             min: temp,
             max: temp,
             count: 1,
-            running_total: temp as u32,
+            running_total: temp as i64,
             mutliplier: 10.0,
         }
     }
@@ -69,7 +69,7 @@ impl StationAverage {
         // we're going to do a lot of calls to update_values(), so instead of computing the average
         // each time. We'll just keep a running total and a count of all the temps we've seen. Then
         // at the end of the process, we'll compute the average once.
-        self.running_total += temp as u32;
+        self.running_total += temp as i64;
         self.count += 1;
     }
 
@@ -144,5 +144,14 @@ mod tests {
         // (20 + 10 + 5) / 3 = 35/3 = 11 + 2/3
         let expected_average = 11.666666667;
         assert!((station_average.average() - expected_average).abs() <= EPS);
+    }
+
+    #[test]
+    fn negative_temperatures_keep_the_running_total_signed() {
+        let mut station_average = StationAverage::new("Test".as_bytes(), 10);
+        station_average.update_values(-20);
+
+        assert_eq!(station_average.min, -20);
+        assert!((station_average.average() - -0.5).abs() <= 1e-6);
     }
 }

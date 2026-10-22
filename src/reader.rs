@@ -167,15 +167,15 @@ pub fn parse_string_to_int(bytes: &[u8]) -> i16 {
     let byte_len = bytes.len();
     let frac_part = (bytes[byte_len - 1] ^ 0x30) as i16;
     let mut int_part = 0;
-    let is_neg = (bytes[0] == 0x30) as usize;
-    let mut index = is_neg;
+    let is_negative = bytes[0] == b'-';
+    let mut index = is_negative as usize;
     let max_index = byte_len - 2;
     while index < max_index {
         int_part = int_part * 10 + (bytes[index] ^ 0x30) as i16;
         index += 1;
     }
     int_part = int_part * 10 + frac_part;
-    if is_neg == 1 {
+    if is_negative {
         -int_part
     } else {
         int_part
@@ -292,5 +292,13 @@ mod tests {
 
         assert_eq!(container.get(&first_key).unwrap().count(), 2);
         assert_eq!(container.get(&second_key).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn parses_negative_temperatures_as_signed_tenths() {
+        assert_eq!(super::parse_string_to_int(b"0.0"), 0);
+        assert_eq!(super::parse_string_to_int(b"12.3"), 123);
+        assert_eq!(super::parse_string_to_int(b"-12.3"), -123);
+        assert_eq!(super::parse_string_to_int(b"-99.9"), -999);
     }
 }
