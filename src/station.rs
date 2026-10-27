@@ -1,14 +1,14 @@
 const MAX_ARRAY_SIZE: usize = 100;
 
+#[repr(C)]
 #[derive(Clone, Debug, Copy)]
 pub struct StationAverage {
-    pub name: [u8; MAX_ARRAY_SIZE],
-    name_len: u8,
     min: i16,
     max: i16,
     count: u32,
     running_total: i64,
-    mutliplier: f32,
+    pub name: [u8; MAX_ARRAY_SIZE],
+    name_len: u8,
 }
 
 impl PartialEq for StationAverage {
@@ -36,13 +36,12 @@ impl StationAverage {
         let mut arr = [0u8; MAX_ARRAY_SIZE];
         arr[..name.len()].copy_from_slice(&name[..name.len()]);
         StationAverage {
-            name: arr,
-            name_len: name.len() as u8,
             min: temp,
             max: temp,
             count: 1,
             running_total: temp as i64,
-            mutliplier: 10.0,
+            name: arr,
+            name_len: name.len() as u8,
         }
     }
 
@@ -53,8 +52,7 @@ impl StationAverage {
 
     #[inline(always)]
     pub fn matches_name(&self, name: &[u8]) -> bool {
-        self.name_len as usize == name.len()
-            && self.name[..self.name_len as usize] == *name
+        self.name_len as usize == name.len() && self.name[..self.name_len as usize] == *name
     }
 
     pub fn count(&self) -> u32 {
@@ -75,9 +73,7 @@ impl StationAverage {
 
     #[inline]
     pub fn average(&self) -> f32 {
-        let f = self.running_total as f32 / self.mutliplier;
-        let ave = f / self.count as f32;
-        return ave;
+        self.running_total as f32 / (self.count as f32 * 10.0)
     }
 
     pub fn to_string(&self) -> String {
@@ -109,13 +105,12 @@ impl StationAverage {
 impl Default for StationAverage {
     fn default() -> Self {
         StationAverage {
-            name: [0; MAX_ARRAY_SIZE],
-            name_len: 0,
             min: 0,
             max: 0,
             count: 0,
             running_total: 0,
-            mutliplier: 100.0,
+            name: [0; MAX_ARRAY_SIZE],
+            name_len: 0,
         }
     }
 }
