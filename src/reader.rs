@@ -1,12 +1,19 @@
-use crate::{station::StationAverage};
+use crate::station::StationAverage;
+use affinity::{self, set_thread_affinity};
 use memmap2::Mmap;
 use std::{
-    arch::x86_64::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8}, fs::File, sync::{
+    arch::x86_64::{
+        __m128i, __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8,
+        _mm256_set1_epi8, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
+    },
+    fs::File,
+    os::fd::AsRawFd,
+    sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
-    }, time
+    },
+    time::{Duration, Instant},
 };
-use affinity::{self, set_thread_affinity};
 
 const ARRAY_SIZE: usize = 1 << 10;
 #[repr(C)]
@@ -23,7 +30,6 @@ impl Container {
             size: ARRAY_SIZE,
         };
     }
-
 
     #[inline(always)]
     pub fn update(&mut self, key: &[u8], element: i16) {
@@ -70,34 +76,78 @@ impl Container {
 
     #[inline(always)]
     fn compute_index(&self, key: &[u8]) -> usize {
-        let hash = self.fnv1a(key) as usize;
+        let hash = self.hash_name(key) as usize;
         let index = hash & (self.size - 1);
         index
     }
 
-
     #[inline(always)]
-    fn fnv1a(&self, key: &[u8]) -> usize {
-        let mut hash = 0xcbf29ce484222325;
-        let fnv_prime = 0x100000001b3;
-        for b in key {
-            hash = hash ^ (*b as u64);
-            hash = hash.wrapping_mul(fnv_prime);
+    fn hash_name(&self, key: &[u8]) -> u64 {
+        const BLOCK_MIX: u64 = 0x9e3779b185ebca87;
+        const FINAL_MIX_1: u64 = 0xff51afd7ed558ccd;
+        const FINAL_MIX_2: u64 = 0xc4ceb9fe1a85ec53;
+
+        let mut hash = (key.len() as u64).wrapping_mul(BLOCK_MIX);
+        let mut chunks = key.chunks_exact(8);
+
+        for chunk in chunks.by_ref() {
+            let word = u64::from_le_bytes(chunk.try_into().unwrap());
+            hash ^= word;
+            hash = hash.rotate_left(27).wrapping_mul(BLOCK_MIX);
         }
-        hash as usize
+
+        let remainder = chunks.remainder();
+        if !remainder.is_empty() {
+            let mut tail = 0u64;
+            for (shift, byte) in remainder.iter().enumerate() {
+                tail |= u64::from(*byte) << (shift * 8);
+            }
+            hash ^= tail;
+            hash = hash.rotate_left(27).wrapping_mul(BLOCK_MIX);
+        }
+
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(FINAL_MIX_1);
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(FINAL_MIX_2);
+        hash ^ (hash >> 33)
     }
 }
 
-
 const READER_THREADS: usize = 8;
-const WORKER_THREADS: usize = 2;
-const CHUNK_SIZE: usize = 1 << 16;
+const CHUNK_SIZE: usize = 1 << 21;
 
+struct WorkerProfile {
+    worker_id: usize,
+    core_id: usize,
+    chunks: usize,
+    bytes: usize,
+    wall_time: Duration,
+    cpu_time: Duration,
+    minor_page_faults: i64,
+    major_page_faults: i64,
+    slowest_chunk: Duration,
+}
 
+#[derive(Clone, Copy)]
+struct PageFaults {
+    minor: i64,
+    major: i64,
+}
+
+enum WorkerResult {
+    Standard(Container),
+    Profiled(Container, WorkerProfile),
+}
 
 pub fn read_with_mmap(file: String) {
+    let read_start = Instant::now();
+    let profiling = std::env::var_os("BRC_PROFILE").is_some();
     println!("{}", file);
     let file = File::open(file).unwrap();
+    let advisory_result =
+        unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_SEQUENTIAL) };
+    assert_eq!(advisory_result, 0, "failed to set sequential-read advisory");
     let mmap = unsafe { Mmap::map(&file).unwrap() };
     let mmap = Arc::new(mmap);
     let cores: Arc<Vec<usize>> = Arc::new((0..affinity::get_core_num()).collect());
@@ -110,17 +160,38 @@ pub fn read_with_mmap(file: String) {
         let cores = cores.clone();
         let h = std::thread::spawn(move || {
             set_thread_affinity([cores[i]]).unwrap();
-            worker(mmap, file_size, c, i)
+            if profiling {
+                let (container, profile) = profiled_worker(mmap, file_size, c, i, cores[i]);
+                WorkerResult::Profiled(container, profile)
+            } else {
+                WorkerResult::Standard(worker(mmap, file_size, c, i))
+            }
         });
         handles.push(h);
     }
 
+    let mut profiles = Vec::with_capacity(READER_THREADS);
     for h in handles {
-        let _ = h.join().unwrap();
+        match h.join().unwrap() {
+            WorkerResult::Standard(container) => drop(container),
+            WorkerResult::Profiled(container, profile) => {
+                drop(container);
+                profiles.push(profile);
+            }
+        }
+    }
+
+    if profiling {
+        print_profile(&mut profiles, file_size, read_start.elapsed());
     }
 }
 
-fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>, _worker_id: usize) -> Container {
+fn worker(
+    mmap: Arc<Mmap>,
+    file_size: usize,
+    counter: Arc<AtomicUsize>,
+    _worker_id: usize,
+) -> Container {
     let mut container = Container::new();
     // println!("worker: {} is pinned to {:?}", worker_id, get_thread_affinity().unwrap());
     loop {
@@ -130,9 +201,116 @@ fn worker(mmap: Arc<Mmap>, file_size: usize, counter: Arc<AtomicUsize>, _worker_
         }
         let (start_bound, end_bound) = find_start_end_bounds(&mmap, start, CHUNK_SIZE);
         let chunk = &mmap[start_bound..end_bound];
-        unsafe { process_lines(chunk, &mut container) };
+        process_lines(chunk, &mut container);
     }
     container
+}
+
+fn profiled_worker(
+    mmap: Arc<Mmap>,
+    file_size: usize,
+    counter: Arc<AtomicUsize>,
+    worker_id: usize,
+    core_id: usize,
+) -> (Container, WorkerProfile) {
+    let worker_start = Instant::now();
+    let cpu_start = current_thread_cpu_time();
+    let faults_start = current_thread_page_faults();
+    let mut container = Container::new();
+    let mut chunks = 0;
+    let mut bytes = 0;
+    let mut slowest_chunk = Duration::ZERO;
+
+    loop {
+        let start = counter.fetch_add(CHUNK_SIZE, Ordering::Relaxed);
+        if start >= file_size {
+            break;
+        }
+
+        let chunk_start = Instant::now();
+        let (start_bound, end_bound) = find_start_end_bounds(&mmap, start, CHUNK_SIZE);
+        let chunk = &mmap[start_bound..end_bound];
+        process_lines(chunk, &mut container);
+
+        chunks += 1;
+        bytes += chunk.len();
+        slowest_chunk = slowest_chunk.max(chunk_start.elapsed());
+    }
+
+    let faults_end = current_thread_page_faults();
+    let profile = WorkerProfile {
+        worker_id,
+        core_id,
+        chunks,
+        bytes,
+        wall_time: worker_start.elapsed(),
+        cpu_time: current_thread_cpu_time().saturating_sub(cpu_start),
+        minor_page_faults: faults_end.minor - faults_start.minor,
+        major_page_faults: faults_end.major - faults_start.major,
+        slowest_chunk,
+    };
+    (container, profile)
+}
+
+fn current_thread_page_faults() -> PageFaults {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    let result = unsafe { libc::getrusage(libc::RUSAGE_THREAD, usage.as_mut_ptr()) };
+    assert_eq!(result, 0, "failed to read worker resource usage");
+    let usage = unsafe { usage.assume_init() };
+    PageFaults {
+        minor: usage.ru_minflt,
+        major: usage.ru_majflt,
+    }
+}
+
+fn current_thread_cpu_time() -> Duration {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+    assert_eq!(result, 0, "failed to read worker CPU time");
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+fn print_profile(profiles: &mut [WorkerProfile], file_size: usize, total_wall_time: Duration) {
+    profiles.sort_by_key(|profile| profile.worker_id);
+    let total_cpu_time: Duration = profiles.iter().map(|profile| profile.cpu_time).sum();
+    let total_minor_faults: i64 = profiles
+        .iter()
+        .map(|profile| profile.minor_page_faults)
+        .sum();
+    let total_major_faults: i64 = profiles
+        .iter()
+        .map(|profile| profile.major_page_faults)
+        .sum();
+
+    eprintln!(
+        "Profile: {:.2} GiB, wall {:?}, aggregate worker CPU {:?}, page faults {} minor / {} major",
+        file_size as f64 / (1024.0 * 1024.0 * 1024.0),
+        total_wall_time,
+        total_cpu_time,
+        total_minor_faults,
+        total_major_faults,
+    );
+    for profile in profiles {
+        let throughput = profile.bytes as f64 / profile.wall_time.as_secs_f64() / 1_000_000_000.0;
+        let cpu_share = profile.cpu_time.as_secs_f64() / profile.wall_time.as_secs_f64() * 100.0;
+        eprintln!(
+            "  worker {} (CPU {}): {:6} chunks, {:5.2} GiB, wall {:?}, CPU {:?} ({:4.1}%), {} minor / {} major faults, {:.2} GB/s, slowest chunk {:?}",
+            profile.worker_id,
+            profile.core_id,
+            profile.chunks,
+            profile.bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+            profile.wall_time,
+            profile.cpu_time,
+            cpu_share,
+            profile.minor_page_faults,
+            profile.major_page_faults,
+            throughput,
+            profile.slowest_chunk,
+        );
+    }
 }
 
 #[inline(always)]
@@ -192,7 +370,15 @@ fn find_start_end_bounds(bytes: &[u8], start: usize, chunk_size: usize) -> (usiz
 }
 
 #[inline(always)]
-unsafe fn process_lines(chunk: &[u8], container: &mut Container) {
+fn process_lines(chunk: &[u8], container: &mut Container) {
+    if std::is_x86_feature_detected!("avx2") {
+        unsafe { process_lines_avx2(chunk, container) };
+    } else {
+        unsafe { process_lines_sse2(chunk, container) };
+    }
+}
+
+unsafe fn process_lines_sse2(chunk: &[u8], container: &mut Container) {
     const REG_WIDTH: usize = 16;
     let mut position = 0;
     let mut line_start = 0;
@@ -200,7 +386,34 @@ unsafe fn process_lines(chunk: &[u8], container: &mut Container) {
     while position + REG_WIDTH <= chunk.len() {
         let c = _mm_loadu_si128(chunk.as_ptr().add(position) as *const __m128i);
         let cmpr = _mm_cmpeq_epi8(c, needle);
-        let mut mask = _mm_movemask_epi8(cmpr);
+        let mut mask = _mm_movemask_epi8(cmpr) as u32;
+        while mask != 0 {
+            let line_end = position + mask.trailing_zeros() as usize;
+            process_line(&chunk[line_start..line_end], container);
+            line_start = line_end + 1;
+            mask &= mask - 1;
+        }
+        position += REG_WIDTH;
+    }
+    while position < chunk.len() {
+        if chunk[position] == b'\n' {
+            process_line(&chunk[line_start..position], container);
+            line_start = position + 1;
+        }
+        position += 1;
+    }
+}
+
+#[target_feature(enable = "avx2")]
+unsafe fn process_lines_avx2(chunk: &[u8], container: &mut Container) {
+    const REG_WIDTH: usize = 32;
+    let mut position = 0;
+    let mut line_start = 0;
+    let needle = _mm256_set1_epi8(b'\n' as i8);
+    while position + REG_WIDTH <= chunk.len() {
+        let c = _mm256_loadu_si256(chunk.as_ptr().add(position) as *const __m256i);
+        let cmpr = _mm256_cmpeq_epi8(c, needle);
+        let mut mask = _mm256_movemask_epi8(cmpr) as u32;
         while mask != 0 {
             let line_end = position + mask.trailing_zeros() as usize;
             process_line(&chunk[line_start..line_end], container);
@@ -262,7 +475,8 @@ mod tests {
             first_key_for_index[index] = Some(key);
         }
 
-        let (first_key, second_key) = collision.expect("pigeonhole principle guarantees a collision");
+        let (first_key, second_key) =
+            collision.expect("pigeonhole principle guarantees a collision");
         container.update(&first_key, 100);
         container.update(&second_key, 200);
         container.update(&first_key, 300);
@@ -280,10 +494,18 @@ mod tests {
     }
 
     #[test]
+    fn finds_separator_for_each_temperature_shape() {
+        assert_eq!(super::get_sep(b"X;1.2"), 1);
+        assert_eq!(super::get_sep(b"X;12.3"), 1);
+        assert_eq!(super::get_sep(b"X;-1.2"), 1);
+        assert_eq!(super::get_sep(b"X;-12.3"), 1);
+    }
+
+    #[test]
     fn processes_lines_without_storing_newline_positions() {
         let mut container = Container::new();
 
-        unsafe { super::process_lines(b"a;1.0\nb;-2.0\na;3.0\n", &mut container) };
+        super::process_lines(b"a;1.0\nb;-2.0\na;3.0\n", &mut container);
 
         let first = container.get(b"a").unwrap();
         assert_eq!(first.count(), 2);
@@ -292,5 +514,34 @@ mod tests {
         let second = container.get(b"b").unwrap();
         assert_eq!(second.count(), 1);
         assert_eq!(second.average(), -2.0);
+    }
+
+    #[test]
+    fn sse2_fallback_processes_lines_correctly() {
+        let mut container = Container::new();
+
+        unsafe { super::process_lines_sse2(b"a;1.0\nb;-2.0\na;3.0\n", &mut container) };
+
+        let first = container.get(b"a").unwrap();
+        assert_eq!(first.count(), 2);
+        assert_eq!(first.average(), 2.0);
+
+        let second = container.get(b"b").unwrap();
+        assert_eq!(second.count(), 1);
+        assert_eq!(second.average(), -2.0);
+    }
+
+    #[test]
+    fn word_hash_includes_middle_bytes_and_remainder() {
+        let container = Container::new();
+
+        assert_ne!(
+            container.hash_name(b"abcdefghMIDDLE00qrstuvwx"),
+            container.hash_name(b"abcdefghMIDDLE11qrstuvwx")
+        );
+        assert_ne!(
+            container.hash_name(b"abcdefghZ"),
+            container.hash_name(b"abcdefghY")
+        );
     }
 }
